@@ -64,6 +64,9 @@ class sample_dist(Dist):
     def _upper(self, lo, up):
         return up
 
+    def _mom(self, k, lo, up):
+        return numpy.mean(self.samples**k)
+
     def sample(self, size=(), rule="random", antithetic=None, verbose=False, **kws):
         """
         Overwrite sample() function, because the constructed Dist that is
