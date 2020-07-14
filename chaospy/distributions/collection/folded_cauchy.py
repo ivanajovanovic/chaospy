@@ -42,13 +42,13 @@ class FoldedCauchy(Add):
         FoldedCauchy(scale=2, shape=3, shift=1)
         >>> q = numpy.linspace(0,1,6)[1:-1]
         >>> distribution.inv(q).round(4)
-        array([ 5.1449,  6.708 ,  8.0077, 10.6502])
+        array([ 5.1449,  6.708 ,  8.0077, 10.6504])
         >>> distribution.fwd(distribution.inv(q)).round(4)
         array([0.2, 0.4, 0.6, 0.8])
         >>> distribution.pdf(distribution.inv(q)).round(4)
         array([0.0915, 0.1603, 0.1306, 0.0393])
         >>> distribution.sample(4).round(4)
-        array([9.2648, 7.5918, 7.2159, 7.1782])
+        array([20.764 ,  9.1526,  8.1847,  9.7164])
     """
 
     def __init__(self, shape=0, scale=1, shift=0):

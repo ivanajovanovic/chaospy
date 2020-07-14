@@ -62,7 +62,7 @@ class Wald(Add):
         >>> distribution.pdf(distribution.inv(q)).round(4)
         array([0.3242, 0.2262, 0.138 , 0.063 ])
         >>> distribution.sample(4).round(4)
-        array([ 9.7718,  2.3482, 10.1276,  5.6088])
+        array([ 9.7717,  2.3482, 10.1278,  5.6088])
     """
 
     def __init__(self, mu=1, scale=1, shift=0):

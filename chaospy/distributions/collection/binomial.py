@@ -31,7 +31,7 @@ class Binomial(Dist):
         >>> distribution.fwd(distribution.inv(q)).round(2)
         array([0.  , 0.14, 0.29, 0.43, 0.57, 0.71, 0.86, 1.  ])
         >>> distribution.sample(10)
-        array([3, 1, 2, 1, 0, 2, 2, 2, 2, 3])
+        array([1, 0, 3, 1, 2, 1, 0, 2, 2, 2])
         >>> distribution.mom([1, 2, 3]).round(4)
         array([1.5 , 3.  , 6.75])
         >>> distribution.ttr([1, 2, 3]).round(4)

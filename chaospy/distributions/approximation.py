@@ -12,6 +12,7 @@ def approximate_inverse(
         qloc,
         parameters=None,
         cache=None,
+        x0=None,
         iterations=300,
         tol=1e-5,
         seed=None,
@@ -49,7 +50,7 @@ def approximate_inverse(
         >>> distribution = chaospy.Normal(1000, 10)
         >>> qloc = numpy.array([[0.1, 0.2, 0.9]])
         >>> approximate_inverse(distribution, qloc, seed=1234).round(4)
-        array([[ 987.1846,  991.5839, 1012.8152]])
+        array([[ 987.1845,  991.5841, 1012.8155]])
         >>> distribution.inv(qloc).round(4)
         array([[ 987.1845,  991.5838, 1012.8155]])
     """
@@ -61,7 +62,8 @@ def approximate_inverse(
         cache = {}
     xlower = distribution.lower
     xupper = distribution.upper
-    xloc = 0.5*(xlower+xupper)
+    xloc = (xlower+(xlower+xupper)*qloc.T).T if x0 is None else x0
+
     xloc = (xloc.T + numpy.zeros(qloc.shape).T).T
     xlower = (xlower.T + numpy.zeros(qloc.shape).T).T
     xupper = (xupper.T + numpy.zeros(qloc.shape).T).T
