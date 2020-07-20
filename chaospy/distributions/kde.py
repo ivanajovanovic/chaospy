@@ -1,6 +1,8 @@
 """
 Gaussian kernel density estimation.
 """
+from __future__ import division
+
 import numpy
 from scipy.special import comb, ndtr, ndtri, factorial2
 from scipy.stats import gaussian_kde
@@ -13,20 +15,20 @@ def batch_input(method):
     """
     Wrapper function ensuring that a KDE method never causes memory errors.
     """
-    def wrapper(self, loc, bandwidth):
+    def wrapper(self, loc):
         out = numpy.zeros(loc.shape)
         for idx in range(0, loc.size, self.step_size):
             out[:, idx:idx+self.step_size] = method(
-                self, loc[:, idx:idx+self.step_size], bandwidth=bandwidth)
+                self, loc[:, idx:idx+self.step_size])
         return out
     return wrapper
 
 
-class UnivariateGaussianKDE(Dist):
+class GaussianKDE(Dist):
     """
     Examples:
         >>> samples = [-1, 0, 1]
-        >>> dist = UnivariateGaussianKDE(samples, 0.4)
+        >>> dist = GaussianKDE(samples, 0.4**2)
         >>> dist.pdf([-1, -0.5, 0, 0.5, 1]).round(4)
         array([0.4711, 0.1971, 0.472 , 0.1971, 0.4711])
         >>> dist.cdf([-1, -0.5, 0, 0.5, 1]).round(4)
@@ -40,12 +42,20 @@ class UnivariateGaussianKDE(Dist):
         >>> abs(numpy.mean(dist.pdf(t))*(t[-1]-t[0]) - 1)  # err
         9.999999999177334e-07
 
+        >>> samples = [[-1, 0, 1], [0, 1, 2]]
+        >>> dist = GaussianKDE(samples, 0.4)
+        >>> dist.pdf([[0, 0, 1, 1], [0, 1, 0, 1]]).round(4)
+        array([0.0435, 0.2688, 0.0018, 0.0435])
+        >>> dist.inv([[0, 0, 1, 1], [0, 1, 0, 1]]).round(4)
+        array([[-4.7436, -4.7436,  5.1709,  5.1709],
+               [-4.6393,  6.0524, -4.5387,  6.4044]])
+
     """
 
     def __init__(self, samples, bandwidth="scott", batch_size=1e7):
-        self.samples = numpy.atleast_1d(samples)
-        assert self.samples.ndim == 1
-        dim = 1
+        self.samples = numpy.atleast_2d(samples)
+        assert self.samples.ndim == 2
+        self.dim = len(self.samples)
         size = self.samples.shape[-1]
 
         self.batch_size = batch_size
@@ -55,51 +65,66 @@ class UnivariateGaussianKDE(Dist):
 
         # the scale is taken from Scott-92.
         # The Scott factor is taken from scipy docs.
-        if bandwidth == "scott":
-            q1, q3 = numpy.percentile(self.samples, [25, 75])
-            scale = min(numpy.std(samples), (q3-q1)/1.34)
-            scott_factor = size**(-1./(dim+4))
-            bandwidth = scale*scott_factor
-
-        elif bandwidth == "silverman":
-            q1, q3 = numpy.percentile(self.samples, [25, 75])
-            scale = min(numpy.std(samples), (q3-q1)/1.34)
-            scott_factor = (size*(dim+2)/4.)**(-1./(dim+4))
-            bandwidth = scale*scott_factor
+        if bandwidth in ("scott", "silverman"):
+            qrange = numpy.quantile(self.samples, [0.25, 0.75], axis=1).ptp()
+            scale = min(numpy.std(samples, axis=1), qrange/1.34)
+            if bandwidth == "scott":
+                scott_factor = size**(-1./(self.dim+4))
+            else:
+                scott_factor = (size*(self.dim+2)/4.)**(-1./(self.dim+4))
+            bandwidth = numpy.diag(scale*scott_factor)**2
 
         else:
             bandwidth = numpy.asfarray(bandwidth)
+            if bandwidth.ndim in (0, 1):
+                bandwidth = bandwidth*numpy.eye(self.dim)
+        assert bandwidth.shape == (self.dim, self.dim)
+        self.L = numpy.linalg.cholesky(bandwidth)
+        self.Li = numpy.linalg.inv(self.L)
 
-        Dist.__init__(self, bandwidth=bandwidth)
+        Dist.__init__(self)
 
-    @batch_input
-    def _pdf(self, x_loc, bandwidth):
-        s, t = numpy.mgrid[:x_loc.size, :self.samples.size]
-        x_loc = x_loc.ravel()[s]
-        samples = self.samples[t]
-        z_loc = (x_loc-samples)/bandwidth
-        # Normal dist normalizes with 1/sqrt(2*pi),
-        # However this PDF normalizes with 1/sqrt(pi).
-        # No idea why, but I assume I am missing a factor.
-        out = numpy.e**(-z_loc**2)/(numpy.sqrt(numpy.pi)*bandwidth)
-        return numpy.mean(out, axis=1)
+    def __len__(self):
+        return self.dim
 
     @batch_input
-    def _cdf(self, x_loc, bandwidth):
-        s, t = numpy.mgrid[:x_loc.size, :self.samples.size]
-        x_loc = x_loc.ravel()[s]
-        samples = self.samples[t]
-        z_loc = (x_loc-samples)/bandwidth
-        return numpy.mean(ndtr(z_loc), axis=1)
+    def _pdf(self, x_loc):
+        s, t = numpy.mgrid[:x_loc.shape[-1], :self.samples.shape[-1]]
+        out = numpy.zeros(x_loc.shape)
+        denomenator = numpy.ones(1)
+        for idx in range(len(self)):
+            x_loc_ = x_loc[idx, s]
+            samples = self.samples[idx, t]
+            z_loc = (x_loc_-samples)*self.Li[idx, idx]
+            # Normal dist normalizes with 1/sqrt(2*pi),
+            # However this PDF normalizes with 1/sqrt(pi).
+            # No idea why, but I assume I am missing a factor.
+            numerator = numpy.e**(-z_loc**2)/numpy.sqrt(numpy.pi)*self.Li[idx, idx]*denomenator
+            out[idx] = numpy.mean(numerator, axis=-1)/numpy.mean(denomenator, axis=-1)
+            denomenator = numerator
+        return out
 
     @batch_input
-    def _ppf(self, u_loc, bandwidth):
+    def _cdf(self, x_loc):
+        s, t = numpy.mgrid[:x_loc.shape[-1], :self.samples.shape[-1]]
+        out = numpy.zeros(x_loc.shape)
+        denomenator = numpy.ones(1)
+        for idx in range(len(self)):
+            x_loc_ = x_loc[idx, s]
+            samples = self.samples[idx, t]
+            z_loc = (x_loc_-samples)*self.Li[idx, idx]
+            numerator = ndtr(z_loc)*denomenator
+            out[idx] = numpy.mean(numerator, axis=-1)/numpy.mean(denomenator, axis=-1)
+            denomenator = numerator
+        return out
+
+    @batch_input
+    def _ppf(self, u_loc):
         # speed up convergence considerable, by giving very good initial position.
         x0 = numpy.quantile(self.samples, u_loc[0])[numpy.newaxis]
-        return approximate_inverse(
-            self, u_loc, parameters={"bandwidth": bandwidth}, x0=x0, tol=1e-8)
+        return approximate_inverse(self, u_loc, x0=x0, tol=1e-8)
 
-    def _mom(self, k_loc, bandwidth):
+    def _mom(self, k_loc):
         r"""
 
         Related moment of sum to the individual component:
@@ -120,18 +145,18 @@ class UnivariateGaussianKDE(Dist):
         """
         all_k = numpy.arange(k_loc[0]+1, dtype=int)
         moments = .5*factorial2(all_k-1)*(1+(-1)**all_k)  # standard normal moments
-        moments *= bandwidth**all_k
+        moments *= self.L[0, 0]**all_k
         coeffs = comb(k_loc[0], all_k)
         s, t = numpy.mgrid[:self.samples.size, :moments.size]
-        samples = self.samples[s]**all_k[::-1]
+        samples = self.samples[0, s]**all_k[::-1]
         out = numpy.sum(moments[t]*coeffs[t]*samples, axis=1)
         return numpy.mean(out)
 
-    def _lower(self, bandwidth):
-        return self.samples.min()-7.5*bandwidth
+    def _lower(self):
+        return self.samples.min(axis=-1)-7.5*numpy.sum(self.L, axis=0)
 
-    def _upper(self, bandwidth):
-        return self.samples.max()+7.5*bandwidth
+    def _upper(self):
+        return self.samples.max(axis=-1)+7.5*numpy.sum(self.L, axis=0)
 
 
 # class GaussianKDE(Dist):
